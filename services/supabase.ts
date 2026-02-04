@@ -1,17 +1,52 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Access environment variables
-// Note: In Vite, these are injected via the define config in vite.config.ts
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+// Safely access environment variables
+const getEnvVar = (key: string) => {
+  try {
+    // Check standard Vite env vars first (if available)
+    if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) {
+      return (import.meta as any).env[key];
+    }
+    // Check process.env (injected by Vite define)
+    if (typeof process !== 'undefined' && process.env && process.env[key]) {
+      return process.env[key];
+    }
+  } catch (e) {
+    // Ignore errors accessing env
+  }
+  return '';
+};
 
-if (!supabaseUrl || !supabaseKey) {
-  console.warn('Supabase URL or Key is missing. Database features will fail. Please check your .env settings.');
+let supabaseUrl = getEnvVar('VITE_SUPABASE_URL') || getEnvVar('SUPABASE_URL');
+const supabaseKey = getEnvVar('VITE_SUPABASE_KEY') || getEnvVar('SUPABASE_KEY');
+let validConfig = false;
+
+// Sanitize URL
+if (supabaseUrl) {
+  supabaseUrl = supabaseUrl.trim();
+  if (supabaseUrl.includes('https//') && !supabaseUrl.startsWith('https//')) {
+     const match = supabaseUrl.match(/(https?:\/\/[a-zA-Z0-9.-]+)/g);
+     if (match && match.length > 0) {
+        supabaseUrl = match[match.length - 1]; 
+     }
+  }
 }
 
-// Create client with fallback values to prevent "supabaseUrl is required" error during module loading.
-// This ensures the app can render even if .env is missing, though database operations will fail.
+// Validate Configuration
+try {
+  if (!supabaseUrl) throw new Error('Supabase URL not found');
+  new URL(supabaseUrl); // Validation
+  if (!supabaseKey) throw new Error('Supabase Key not found');
+  validConfig = true;
+} catch (e) {
+  console.warn(`Supabase not configured ("${supabaseUrl}"). App will run in Offline/Demo mode.`);
+  supabaseUrl = 'https://placeholder.supabase.co';
+}
+
+export const isSupabaseConfigured = validConfig;
+
+// Create client (even if placeholder, to satisfy exports)
 export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co', 
+  supabaseUrl, 
   supabaseKey || 'placeholder-key'
 );

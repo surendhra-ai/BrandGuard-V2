@@ -1,13 +1,24 @@
-
-import { supabase } from './supabase';
+import { supabase, isSupabaseConfigured } from './supabase';
 import { User, LogEntry, AnalysisSession } from '../types';
 
-// We still use localStorage for session persistence (to know WHO is logged in on refresh)
+// We use localStorage for session persistence
 const SESSION_KEY = 'bg_current_session_user';
 
 // --- Auth / User Management ---
 
 export const dbRegisterUser = async (email: string, name: string): Promise<User> => {
+  if (!isSupabaseConfigured) {
+    console.log('[Offline] Registering user locally');
+    const user: User = {
+      id: 'offline-' + Date.now(),
+      email,
+      name,
+      createdAt: new Date().toISOString()
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    return user;
+  }
+
   // Check if exists
   const { data: existing } = await supabase
     .from('app_users')
@@ -34,12 +45,25 @@ export const dbRegisterUser = async (email: string, name: string): Promise<User>
     createdAt: data.created_at
   };
 
-  // Set session
   localStorage.setItem(SESSION_KEY, JSON.stringify(user));
   return user;
 };
 
 export const dbLoginUser = async (email: string): Promise<User> => {
+  if (!isSupabaseConfigured) {
+    console.log('[Offline] Logging in locally');
+    // Simulate login by creating a dummy user session if one doesn't exist matching the email
+    // For demo purposes, we just create a session for this email
+    const user: User = {
+      id: 'offline-' + email.replace(/[^a-z0-9]/gi, ''),
+      email,
+      name: email.split('@')[0],
+      createdAt: new Date().toISOString()
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    return user;
+  }
+
   const { data, error } = await supabase
     .from('app_users')
     .select('*')
@@ -65,23 +89,25 @@ export const dbLogoutUser = async () => {
   localStorage.removeItem(SESSION_KEY);
 };
 
-// Gets user from local session storage (fast check), then verifies with DB if needed
 export const dbGetCurrentUser = async (): Promise<User | null> => {
   const sessionStr = localStorage.getItem(SESSION_KEY);
   if (!sessionStr) return null;
   
   try {
-    const user = JSON.parse(sessionStr);
-    // Optional: Refresh from DB to ensure still valid
-    return user;
+    return JSON.parse(sessionStr);
   } catch {
     return null;
   }
 };
 
-// --- API Keys (Stored in User Table) ---
+// --- API Keys (Stored in User Table or LocalStorage in offline mode) ---
 
 export const dbSaveFirecrawlKey = async (userId: string, key: string): Promise<void> => {
+  if (!isSupabaseConfigured) {
+    localStorage.setItem(`firecrawl_key_${userId}`, key);
+    return;
+  }
+
   const { error } = await supabase
     .from('app_users')
     .update({ firecrawl_key: key })
@@ -91,6 +117,10 @@ export const dbSaveFirecrawlKey = async (userId: string, key: string): Promise<v
 };
 
 export const dbGetFirecrawlKey = async (userId: string): Promise<string | null> => {
+  if (!isSupabaseConfigured) {
+    return localStorage.getItem(`firecrawl_key_${userId}`);
+  }
+
   const { data, error } = await supabase
     .from('app_users')
     .select('firecrawl_key')
@@ -104,7 +134,11 @@ export const dbGetFirecrawlKey = async (userId: string): Promise<string | null> 
 // --- Logs ---
 
 export const dbAddLog = async (userId: string, userName: string, action: LogEntry['action'], details: string) => {
-  // Fire and forget, don't await strictly in UI unless needed
+  if (!isSupabaseConfigured) {
+    console.debug(`[Log - ${action}] ${details}`);
+    return;
+  }
+
   await supabase
     .from('logs')
     .insert([{ 
@@ -116,6 +150,10 @@ export const dbAddLog = async (userId: string, userName: string, action: LogEntr
 };
 
 export const dbGetLogs = async (): Promise<LogEntry[]> => {
+  if (!isSupabaseConfigured) {
+    return [];
+  }
+
   const { data, error } = await supabase
     .from('logs')
     .select('*')
@@ -136,6 +174,16 @@ export const dbGetLogs = async (): Promise<LogEntry[]> => {
 // --- Analysis History ---
 
 export const dbSaveAnalysis = async (session: Omit<AnalysisSession, 'id' | 'timestamp'>) => {
+  if (!isSupabaseConfigured) {
+    // In offline mode, we don't persist history to keep it simple, or could use IndexedDB
+    // For now, just return a mock success
+    return {
+      ...session,
+      id: 'offline-analysis-' + Date.now(),
+      timestamp: new Date().toISOString()
+    };
+  }
+
   const { data, error } = await supabase
     .from('analysis_history')
     .insert([{
@@ -157,6 +205,10 @@ export const dbSaveAnalysis = async (session: Omit<AnalysisSession, 'id' | 'time
 };
 
 export const dbGetHistory = async (userId: string): Promise<AnalysisSession[]> => {
+  if (!isSupabaseConfigured) {
+    return [];
+  }
+
   const { data, error } = await supabase
     .from('analysis_history')
     .select('*')
@@ -176,6 +228,8 @@ export const dbGetHistory = async (userId: string): Promise<AnalysisSession[]> =
 };
 
 export const dbDeleteHistory = async (id: string) => {
+  if (!isSupabaseConfigured) return;
+
   const { error } = await supabase
     .from('analysis_history')
     .delete()
@@ -185,6 +239,8 @@ export const dbDeleteHistory = async (id: string) => {
 };
 
 export const dbClearAllHistory = async (userId: string) => {
+  if (!isSupabaseConfigured) return;
+
   const { error } = await supabase
     .from('analysis_history')
     .delete()
