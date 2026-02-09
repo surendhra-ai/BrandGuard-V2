@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { GeminiAnalysisResponse } from "../types";
 
@@ -52,8 +53,17 @@ export const analyzeDiscrepancies = async (
   // 1. Text Prompt
   let promptText = `
     You are a Real Estate Compliance Auditor AI. 
-    Your task is to compare the "Reference Data" (Official Source) against the "Published Landing Page Data".
-    Identify ANY discrepancies in pricing, location, dates, amenities, specifications, contact details, OR visual branding/imagery.
+    Your task is to compare the "Reference Data" (Official Sources) against the "Published Landing Page Data".
+    
+    IMPORTANT - MULTIPLE REFERENCE SOURCES:
+    The "Reference Data" below may contain multiple sources marked as "PRIMARY SOURCE" and "SECONDARY SOURCE".
+    
+    CONFLICT RESOLUTION RULE:
+    1. The PRIMARY SOURCE is the ultimate source of truth.
+    2. If there is a contradiction between the PRIMARY SOURCE and a SECONDARY SOURCE, you must ignore the Secondary Source's conflicting point.
+    3. You should only use Secondary Sources to fill in gaps not covered by the Primary Source.
+    
+    Identify ANY discrepancies in pricing, location, dates, amenities, specifications, contact details, OR visual branding/imagery between the COMBINED REFERENCE TRUTH and the Published Landing Page.
     
     Classify discrepancies by severity:
     - CRITICAL: Wrong price, wrong location, wrong completion date, misleading legal terms, completely wrong building image.
@@ -74,7 +84,7 @@ export const analyzeDiscrepancies = async (
   `;
 
   if (referenceScreenshot || targetScreenshot) {
-    promptText += `\n\nIMAGES PROVIDED: I have attached screenshots of the pages. Please compare visually as well. Check if the target page looks consistent with a premium real estate offering and if any text overlays contradict the reference data.`;
+    promptText += `\n\nIMAGES PROVIDED: I have attached screenshots. The first image is the Reference (Primary) and the second is the Target. Please compare visually as well. Check if the target page looks consistent with the Primary reference style and if any text overlays contradict the reference data.`;
   }
 
   parts.push({ text: promptText });
@@ -90,7 +100,7 @@ export const analyzeDiscrepancies = async (
           data: refBase64
         }
       });
-      parts.push({ text: "Above is the REFERENCE PAGE SCREENSHOT." });
+      parts.push({ text: "Above is the PRIMARY REFERENCE SCREENSHOT." });
     }
   }
 

@@ -1,9 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Play, RotateCcw, Plus, Trash2, PieChart, Activity, AlertTriangle, Settings, Key, LogOut, History, FileText, Filter, ArrowUpDown, CheckCircle, AlertOctagon, ExternalLink, ChevronRight, LayoutDashboard, BarChart3, AlertCircle, Code, Download } from 'lucide-react';
+import { Shield, RotateCcw, Plus, Trash2, Activity, AlertTriangle, Settings, LogOut, History, FileText, Filter, CheckCircle, AlertOctagon, ExternalLink, ChevronRight, LayoutDashboard, BarChart3, AlertCircle, Code, Download } from 'lucide-react';
 import { UrlInputCard } from './components/UrlInputCard';
 import { Button } from './components/Button';
-import { StatusBadge } from './components/StatusBadge';
 import { DiscrepancyModal } from './components/DiscrepancyModal';
 import { ContentPreviewModal } from './components/ContentPreviewModal';
 import { ApiKeyModal } from './components/ApiKeyModal';
@@ -22,9 +21,17 @@ import {
   dbGetFirecrawlKey,
   dbSaveFirecrawlKey
 } from './services/db';
-import { PageAnalysis, ProjectReference, Discrepancy, DiscrepancySeverity, User, AnalysisSession, LogEntry } from './types';
+import { PageAnalysis, Discrepancy, DiscrepancySeverity, User, AnalysisSession, LogEntry } from './types';
 import { MOCK_REFERENCE_TEXT, MOCK_LANDING_PAGE_1, MOCK_LANDING_PAGE_2_WITH_ERRORS } from './constants';
-import { ResponsiveContainer, PieChart as RechartsPie, Pie, Cell, Tooltip } from 'recharts';
+
+interface ReferencePageInput {
+  id: string;
+  name: string;
+  url: string;
+  content: string;
+  screenshot?: string;
+  isScraping?: boolean;
+}
 
 interface TargetPageInput {
   id: string;
@@ -55,12 +62,10 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('DASHBOARD');
 
   // App State
-  const [reference, setReference] = useState<ProjectReference & { isScraping?: boolean }>({
-    name: 'Official Project Specs',
-    url: 'https://auroraheights.com/specs',
-    content: '',
-    lastUpdated: new Date().toISOString()
-  });
+  // References are now an array. Index 0 is Primary.
+  const [references, setReferences] = useState<ReferencePageInput[]>([
+    { id: 'ref-1', name: 'Primary Source', url: 'https://auroraheights.com/specs', content: '' }
+  ]);
 
   const [targets, setTargets] = useState<TargetPageInput[]>([
     { id: '1', url: '', content: '' }
@@ -135,12 +140,7 @@ const App: React.FC = () => {
       await dbLogoutUser();
       setUser(null);
       setResults([]);
-      setReference({
-        name: 'Official Project Specs',
-        url: '',
-        content: '',
-        lastUpdated: new Date().toISOString()
-      });
+      setReferences([{ id: 'ref-1', name: 'Primary Source', url: '', content: '' }]);
       setTargets([{ id: '1', url: '', content: '' }]);
     }
   };
@@ -152,6 +152,32 @@ const App: React.FC = () => {
     if (savedKey) setFirecrawlKey(savedKey);
   };
 
+  // --- Reference Management ---
+  const addReference = () => {
+    if (references.length < 3) {
+      setReferences(prev => [
+        ...prev, 
+        { 
+          id: `ref-${Math.random().toString(36).substr(2, 9)}`, 
+          name: `Secondary Source ${prev.length}`, 
+          url: '', 
+          content: '' 
+        }
+      ]);
+    }
+  };
+
+  const removeReference = (id: string) => {
+    if (references.length > 1) {
+      setReferences(prev => prev.filter(r => r.id !== id));
+    }
+  };
+
+  const updateReference = (id: string, field: 'url' | 'content' | 'isScraping' | 'screenshot', value: any) => {
+    setReferences(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+
+  // --- Target Management ---
   const addTarget = () => {
     setTargets(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), url: '', content: '' }]);
   };
@@ -170,12 +196,13 @@ const App: React.FC = () => {
   };
 
   const loadDemoData = () => {
-    setReference({
-      ...reference,
+    setReferences([{
+      id: 'ref-1',
+      name: 'Primary Specs',
       url: 'https://official-project-site.com/master-plan',
       content: MOCK_REFERENCE_TEXT.trim(),
       screenshot: undefined
-    });
+    }]);
 
     setTargets([
       { id: 'demo1', url: 'https://landing-page-campaign-a.com', content: MOCK_LANDING_PAGE_1.trim(), screenshot: undefined },
@@ -190,17 +217,16 @@ const App: React.FC = () => {
     if (!user) return;
     
     // We treat this as a log entry, though ideally it would update the 'results' JSON blob in DB
-    const action = isAccurate ? 'FEEDBACK_CONFIRMED' : 'FEEDBACK_REJECTED';
     const logDetails = `User marked discrepancy (${discrepancyId}) as ${isAccurate ? 'CORRECT' : 'FALSE POSITIVE'}. Context: ${details}`;
     
     try {
-        await dbAddLog(user.id, user.name, 'ANALYSIS_RUN', logDetails); // Using ANALYSIS_RUN to keep it general, or we could extend types
+        await dbAddLog(user.id, user.name, 'ANALYSIS_RUN', logDetails);
     } catch (e) {
         console.error("Failed to log feedback", e);
     }
   };
 
-  const handleManualScrape = async (type: 'reference' | 'target', id?: string) => {
+  const handleManualScrape = async (type: 'reference' | 'target', id: string) => {
     if (!firecrawlKey) {
       setIsKeyModalOpen(true);
       setErrorMsg("Please configure your Firecrawl API Key to enable scraping.");
@@ -208,9 +234,11 @@ const App: React.FC = () => {
     }
     if (!user) return;
 
-    const urlToScrape = type === 'reference' 
-      ? reference.url 
-      : targets.find(t => t.id === id)?.url;
+    const objToScrape = type === 'reference' 
+      ? references.find(r => r.id === id)
+      : targets.find(t => t.id === id);
+    
+    const urlToScrape = objToScrape?.url;
 
     if (!urlToScrape) {
       setErrorMsg("Please enter a valid URL first.");
@@ -226,10 +254,12 @@ const App: React.FC = () => {
       await dbAddLog(user.id, user.name, 'SCRAPE_URL', `Manually scraped: ${urlToScrape}`);
       
       if (type === 'reference') {
-        setReference(prev => ({ ...prev, isScraping: true }));
+        updateReference(id, 'isScraping', true);
         const result = await scrapeUrl(urlToScrape, firecrawlKey);
-        setReference(prev => ({ ...prev, content: result.markdown, screenshot: result.screenshot, isScraping: false }));
-      } else if (id) {
+        updateReference(id, 'content', result.markdown);
+        updateReference(id, 'screenshot', result.screenshot);
+        updateReference(id, 'isScraping', false);
+      } else {
         updateTarget(id, 'isScraping', true);
         const result = await scrapeUrl(urlToScrape, firecrawlKey);
         updateTarget(id, 'content', result.markdown);
@@ -241,8 +271,8 @@ const App: React.FC = () => {
       const msg = err.message || "Scraping failed";
       setErrorMsg(msg);
       if (type === 'reference') {
-        setReference(prev => ({ ...prev, isScraping: false }));
-      } else if (id) {
+        updateReference(id, 'isScraping', false);
+      } else {
         updateTarget(id, 'isScraping', false);
       }
     }
@@ -275,36 +305,58 @@ const App: React.FC = () => {
     await dbAddLog(user.id, user.name, 'ANALYSIS_RUN', 'Started comparison analysis');
 
     try {
-      // 1. Ensure Reference Content
-      let refContent = reference.content;
-      let refScreenshot = reference.screenshot;
+      // 1. Process References (Combine multiple sources)
+      // We iterate to ensure all have content or scrape them if URL exists
+      const processedReferences: ReferencePageInput[] = [];
 
-      if (!refContent && reference.url && firecrawlKey) {
-        if (!isValidUrl(reference.url)) {
-             throw new Error(`Invalid Reference URL: ${reference.url}`);
-        }
+      for (let i = 0; i < references.length; i++) {
+        const ref = references[i];
+        let content = ref.content;
+        let screenshot = ref.screenshot;
 
-        setReference(prev => ({ ...prev, isScraping: true }));
-        try {
-          const scrapeResult = await scrapeUrl(reference.url, firecrawlKey);
-          refContent = scrapeResult.markdown;
-          refScreenshot = scrapeResult.screenshot;
-          setReference(prev => ({ 
-            ...prev, 
-            content: refContent, 
-            screenshot: refScreenshot,
-            isScraping: false 
-          }));
-        } catch (e) {
-          console.error("Failed reference scrape", e);
-          setReference(prev => ({ ...prev, isScraping: false }));
-          throw new Error("Could not scrape reference URL. Please paste content manually.");
+        // Auto-scrape reference if needed
+        if (!content && ref.url && firecrawlKey) {
+          if (!isValidUrl(ref.url)) {
+             throw new Error(`Invalid Reference URL in Source #${i+1}: ${ref.url}`);
+          }
+          
+          updateReference(ref.id, 'isScraping', true);
+          try {
+            const scrapeResult = await scrapeUrl(ref.url, firecrawlKey);
+            content = scrapeResult.markdown;
+            screenshot = scrapeResult.screenshot;
+            updateReference(ref.id, 'content', content);
+            updateReference(ref.id, 'screenshot', screenshot);
+            updateReference(ref.id, 'isScraping', false);
+          } catch (e) {
+             updateReference(ref.id, 'isScraping', false);
+             throw new Error(`Failed to scrape Reference Source #${i+1}: ${ref.url}`);
+          }
         }
+        
+        // Push even if empty, validation happens next
+        processedReferences.push({ ...ref, content: content || '', screenshot });
       }
 
-      if (!refContent) {
-        throw new Error("Reference content is missing. Please paste content or provide a valid URL to scrape.");
+      // Validate at least primary has content
+      if (!processedReferences[0].content) {
+        throw new Error("Primary reference content is missing. Please provide content for Source 1.");
       }
+
+      // Construct combined reference text for Gemini
+      let combinedRefContent = "";
+      processedReferences.forEach((ref, index) => {
+        if (!ref.content) return;
+        
+        if (index === 0) {
+            combinedRefContent += `--- PRIMARY SOURCE (HIGHEST PRIORITY: Overrides conflicts) ---\nSource Name: ${ref.name || 'Main Specs'}\nURL: ${ref.url || 'N/A'}\n\n${ref.content}\n\n`;
+        } else {
+            combinedRefContent += `--- SECONDARY SOURCE (LOWER PRIORITY) ---\nSource Name: ${ref.name || `Source ${index+1}`}\nURL: ${ref.url || 'N/A'}\n\n${ref.content}\n\n`;
+        }
+      });
+
+      // Use the screenshot from the Primary source for visual comparison
+      const primaryRefScreenshot = processedReferences[0].screenshot;
 
       const newResults: PageAnalysis[] = [];
 
@@ -359,10 +411,10 @@ const App: React.FC = () => {
 
         // 3. Gemini Analysis (with Images if available)
         const analysis = await analyzeDiscrepancies(
-            refContent, 
+            combinedRefContent, 
             contentToAnalyze, 
             target.url || 'Manual Input',
-            refScreenshot,
+            primaryRefScreenshot,
             screenshotToAnalyze
         );
         
@@ -392,11 +444,11 @@ const App: React.FC = () => {
       if (newResults.length > 0) {
         await dbSaveAnalysis({
            userId: user.id,
-           projectName: reference.name || 'Untitled Project',
-           referenceUrl: reference.url,
+           projectName: processedReferences[0].name || 'Untitled Project',
+           referenceUrl: processedReferences[0].url,
            results: newResults
         });
-        await dbAddLog(user.id, user.name, 'ANALYSIS_RUN', `Analysis complete. Processed ${newResults.length} pages.`);
+        await dbAddLog(user.id, user.name, 'ANALYSIS_RUN', `Analysis complete. Processed ${newResults.length} pages against ${processedReferences.length} references.`);
       }
 
     } catch (err: any) {
@@ -465,11 +517,6 @@ const App: React.FC = () => {
       document.body.removeChild(link);
     }
   };
-
-  const chartData = [
-    { name: 'Compliant', value: compliantCount, color: '#10B981' },
-    { name: 'Issues', value: totalPages - compliantCount, color: '#EF4444' },
-  ];
 
   // --- Render Helpers ---
 
@@ -546,24 +593,54 @@ const App: React.FC = () => {
             {/* Input Section */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-12">
               {/* Reference */}
-              <div className="lg:col-span-5 h-full">
-                <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                    <div className="w-6 h-6 rounded bg-indigo-100 text-indigo-600 flex items-center justify-center mr-2 text-xs font-bold">1</div>
-                    Reference Source
-                </h2>
-                <UrlInputCard 
-                  title="Official Project Data"
-                  isReference={true}
-                  url={reference.url}
-                  content={reference.content}
-                  hasScreenshot={!!reference.screenshot}
-                  onUrlChange={(val) => setReference({...reference, url: val})}
-                  onContentChange={(val) => setReference({...reference, content: val})}
-                  placeholder="Paste specs or scrape from official URL..."
-                  className="h-[450px]"
-                  onScrape={() => handleManualScrape('reference')}
-                  isScraping={reference.isScraping}
-                />
+              <div className="lg:col-span-5 h-full flex flex-col">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-lg font-semibold text-gray-800 flex items-center">
+                        <div className="w-6 h-6 rounded bg-indigo-100 text-indigo-600 flex items-center justify-center mr-2 text-xs font-bold">1</div>
+                        Reference Sources
+                    </h2>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-gray-500">
+                        {references.length} / 3 Sources
+                      </span>
+                      <button 
+                        onClick={addReference} 
+                        disabled={references.length >= 3}
+                        className="text-indigo-600 text-sm hover:underline flex items-center font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                          <Plus className="w-3 h-3 mr-1" /> Add Source
+                      </button>
+                    </div>
+                </div>
+
+                <div className="space-y-4 overflow-y-auto max-h-[550px] pr-2 custom-scrollbar flex-grow">
+                  {references.map((ref, idx) => (
+                    <div key={ref.id} className="relative group">
+                      <UrlInputCard 
+                        title={idx === 0 ? "Primary Source (High Priority)" : `Secondary Source #${idx}`}
+                        isReference={true}
+                        url={ref.url}
+                        content={ref.content}
+                        hasScreenshot={!!ref.screenshot}
+                        onUrlChange={(val) => updateReference(ref.id, 'url', val)}
+                        onContentChange={(val) => updateReference(ref.id, 'content', val)}
+                        placeholder={idx === 0 ? "Paste official project specs (Primary Authority)..." : "Paste supporting documents (e.g. Brochures)..."}
+                        className="min-h-[300px]"
+                        onScrape={() => handleManualScrape('reference', ref.id)}
+                        isScraping={ref.isScraping}
+                      />
+                      {idx > 0 && (
+                          <button 
+                              onClick={() => removeReference(ref.id)}
+                              className="absolute top-2 right-2 p-1.5 bg-red-100 text-red-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                              title="Remove Reference"
+                          >
+                              <Trash2 className="w-3 h-3" />
+                          </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {/* Action */}
@@ -575,7 +652,7 @@ const App: React.FC = () => {
                     onClick={runAnalysis} 
                     isLoading={isAnalyzing} 
                     className="w-full lg:w-auto shadow-xl py-4 font-bold text-lg"
-                    disabled={(!reference.content && !reference.url) || targets.every(t => !t.content && !t.url)}
+                    disabled={references.every(r => !r.content && !r.url) || targets.every(t => !t.content && !t.url)}
                 >
                     {isAnalyzing ? 'Analyzing...' : 'Compare Sources'}
                 </Button>
@@ -596,7 +673,7 @@ const App: React.FC = () => {
                     </button>
                 </div>
                 
-                <div className="space-y-4 overflow-y-auto max-h-[450px] pr-2 custom-scrollbar">
+                <div className="space-y-4 overflow-y-auto max-h-[550px] pr-2 custom-scrollbar flex-grow">
                     {targets.map((target, idx) => (
                         <div key={target.id} className="relative group">
                             <UrlInputCard 
@@ -607,15 +684,15 @@ const App: React.FC = () => {
                                 onUrlChange={(val) => updateTarget(target.id, 'url', val)}
                                 onContentChange={(val) => updateTarget(target.id, 'content', val)}
                                 placeholder="Paste content or provide URL..."
-                                className="h-[280px]"
+                                className="min-h-[300px]"
                                 onScrape={() => handleManualScrape('target', target.id)}
                                 isScraping={target.isScraping}
                             />
                              {targets.length > 1 && (
                                 <button 
                                     onClick={() => removeTarget(target.id)}
-                                    className="absolute top-2 right-2 p-1.5 bg-red-100 text-red-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                                    title="Remove"
+                                    className="absolute top-2 right-2 p-1.5 bg-red-100 text-red-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                    title="Remove Page"
                                 >
                                     <Trash2 className="w-3 h-3" />
                                 </button>
@@ -908,7 +985,7 @@ const App: React.FC = () => {
                                             <button 
                                                 onClick={() => {
                                                     setResults(session.results);
-                                                    setReference(prev => ({...prev, url: session.referenceUrl, name: session.projectName}));
+                                                    setReferences([{ id: 'hist-ref', name: session.projectName, url: session.referenceUrl, content: '' }]); // Simplified load for history
                                                     setActiveTab('DASHBOARD');
                                                 }}
                                                 className="text-indigo-600 hover:text-indigo-900 mr-4"
